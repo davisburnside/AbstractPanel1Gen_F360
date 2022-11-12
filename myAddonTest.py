@@ -160,35 +160,30 @@ class CreateExecuteHandler(adsk.core.CommandEventHandler):
                 if line.isConstruction:
 
                     index += 1
+                    design: adsk.fusion.Design = _app.activeProduct
+                    rootComp = design.rootComponent
+                    spawnBodyComp = spawnBody.parentComponent
 
+                    # Get angle between points
                     skPtStartData = line.startSketchPoint.geometry.getData()
                     skPtEndData = line.endSketchPoint.geometry.getData()
-
                     deltaX = -skPtStartData[1] + skPtEndData[1]
                     deltaY = -skPtStartData[2] + skPtEndData[2]
                     angle = math.degrees(math.atan2(deltaY, deltaX))
 
-                    showMessage(f"{skPtStartData}, {skPtEndData}")
-                    showMessage(f"{angle}, {deltaX}, {deltaY}")
-
-                    design: adsk.fusion.Design = _app.activeProduct
-                    rootComp = design.rootComponent
-                    spawnBodyComp = spawnBody.parentComponent
+                    # showMessage(f"{skPtStartData}, {skPtEndData}")
+                    # showMessage(f"{angle}, {deltaX}, {deltaY}")
                     
-                    # Get the XYZ position of the point in model space.
-                    
+                    # Get world midpoint of sketch points
+                    skPtStartWorldData = line.startSketchPoint.worldGeometry.getData()
+                    skPtEndWorldData = line.endSketchPoint.worldGeometry.getData()
+                    midpoint_sketchPoint = adsk.core.Point3D.create(
+                        (skPtStartWorldData[1] + skPtEndWorldData[1]) / 2, 
+                        (skPtStartWorldData[2] + skPtEndWorldData[2]) / 2, 
+                        (skPtStartWorldData[3] + skPtEndWorldData[3]) / 2
+                        )
 
-                    # pointEnt = line.startSketchPoint
-                    # pnt1: adsk.core.Point3D = None
-                    # if pointEnt.objectType == adsk.fusion.SketchPoint.classType():
-                    #     skPoint: adsk.fusion.SketchPoint = pointEnt
-                    #     pnt1 = skPoint.worldGeometry
-                    # else:
-                    #     pnt1 = pointEnt.geometry
-                    # pnt2 = spawnEdge.endVertex.geometry
-
-                    pnt1 = line.startSketchPoint.worldGeometry
-
+                    # Get midpoint of body edge points
                     spawnEdgeStartVert = spawnEdge.startVertex.geometry.getData()
                     spawnEdgeEndVert = spawnEdge.endVertex.geometry.getData()
                     midpoint_spawnEdge = adsk.core.Point3D.create(
@@ -197,15 +192,14 @@ class CreateExecuteHandler(adsk.core.CommandEventHandler):
                         (spawnEdgeStartVert[3] + spawnEdgeEndVert[3]) / 2
                         )
 
-
                     # Create a matrix that defines the translation from point 1 to point 2.
                     trans: adsk.core.Matrix3D = adsk.core.Matrix3D.create()
                     rotationVector = vector = adsk.core.Vector3D.create(0, 1, 0)
 
                     # Get Matrix for movement & rotation of body
-                    trans.setToRotation(math.radians(angle + 90), rotationVector, midpoint_spawnEdge)
+                    trans.setToRotation(math.radians(angle), rotationVector, midpoint_spawnEdge)
                     newTransform = adsk.core.Matrix3D.create()
-                    newTransform.translation = midpoint_spawnEdge.vectorTo(pnt1)
+                    newTransform.translation = midpoint_spawnEdge.vectorTo(midpoint_sketchPoint)
                     trans.transformBy(newTransform)
 
                     # Create Copy / Paste Feature
@@ -227,15 +221,10 @@ class CreateExecuteHandler(adsk.core.CommandEventHandler):
                     # newBody = newOcc.bRepBodies.item(0)
 
             custFeatInput = spawnBodyComp.features.customFeatures.createInput(_customFeatureDef)
-
             custFeatInput.addDependency('Sketch', sketch)
             custFeatInput.addDependency('SpawnBodyEdge', spawnEdge)
-
             custFeatInput.setStartAndEndFeatures(firstFeature, lastFeature)
             spawnBodyComp.features.customFeatures.add(custFeatInput)
-
-            # showMessage(f"{rootComp.features.count}")
-            # showMessage(f"{spawnBodyComp.features.count}")
 
         except:
             eventArgs.executeFailed = True
