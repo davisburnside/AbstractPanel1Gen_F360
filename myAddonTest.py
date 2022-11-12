@@ -214,6 +214,8 @@ def spawnBodyCopies(args):
     directionLineMidpointsCol = adsk.core.ObjectCollection.create()
     copiedBodiesCol = adsk.core.ObjectCollection.create()
 
+    # For each direction line, spawn a body at it's center & align body to line
+    # This has only been tested in the XY plane
     sketchCurves = sketch.sketchCurves
     lines = sketchCurves.sketchLines
     index = -1
@@ -250,17 +252,15 @@ def spawnBodyCopies(args):
                 (spawnEdgeStartVert[3] + spawnEdgeEndVert[3]) / 2
                 )
 
-            # Create a matrix that defines the translation from point 1 to point 2.
-            trans: adsk.core.Matrix3D = adsk.core.Matrix3D.create()
+            # Create a Matrix for movement & rotation of body
+            matrix: adsk.core.Matrix3D = adsk.core.Matrix3D.create()
             rotationVector = vector = adsk.core.Vector3D.create(0, 1, 0)
+            matrix.setToRotation(math.radians(angle), rotationVector, midpoint_spawnEdge)
+            transformMatrix = adsk.core.Matrix3D.create()
+            transformMatrix.translation = midpoint_spawnEdge.vectorTo(midpoint_sketchPoint)
+            matrix.transformBy(transformMatrix)
 
-            # Get Matrix for movement & rotation of body
-            trans.setToRotation(math.radians(angle), rotationVector, midpoint_spawnEdge)
-            newTransform = adsk.core.Matrix3D.create()
-            newTransform.translation = midpoint_spawnEdge.vectorTo(midpoint_sketchPoint)
-            trans.transformBy(newTransform)
-
-            # Create Copy / Paste Feature
+            # Create Copy / Paste Feature for Body
             newCopyFeature = spawnBodyComp.features.copyPasteBodies.add(spawnBody)
             baseBodyCopy = spawnBodyComp.bRepBodies.item(index + 1)
             baseBodyCopy.name = f"CopiedBody_{index}"
@@ -271,7 +271,7 @@ def spawnBodyCopies(args):
             moveFeatures = spawnBodyComp.features.moveFeatures
             inputEnts = adsk.core.ObjectCollection.create()
             inputEnts.add(baseBodyCopy)
-            moveInput = moveFeatures.createInput(inputEnts, trans)
+            moveInput = moveFeatures.createInput(inputEnts, matrix)
             moveFeature = moveFeatures.add(moveInput)
             lastFeature = moveFeature
 
@@ -300,54 +300,61 @@ def spawnBodyCopies(args):
 
 
 
-    # Create a new component 
-    # & make active?
-
     boundaryProfile: adsk.fusion.Profile = _boundaryProfileSelectInput.selection(0).entity
     for profile in boundaryProfile.parentSketch.profiles:
         if profile != boundaryProfile:
          
-            # assign all new extrusion bodies to new component
-
+            # Create Extrusion Feature and get new Body
             extrudes = spawnBodyComp.features.extrudeFeatures
             distance = adsk.core.ValueInput.createByReal(5)
             newExtrude = extrudes.addSimple(profile, distance, adsk.fusion.FeatureOperations.NewBodyFeatureOperation)
-            
-            
-            
-            # get newly created body
             newBody: adsk.fusion.BRepBody = newExtrude.bodies.item(0)
+
+            # Check if the new body contains/touches any direction line midpoints
+            # If so, make an Intersect Feature between the extruded body & copied Body
+            # If not, delete the new body
             bodyHasAPoint = False
-            for point in directionLineMidpointsCol:
+            pointIndex = -1
+            for index, point in enumerate(directionLineMidpointsCol):
                 pc: adsk.fusion.PointContainment = newBody.pointContainment(point)
-                showMessage(f"{pc}?")
                 if (pc == adsk.fusion.PointContainment.PointInsidePointContainment 
                     or pc == adsk.fusion.PointContainment.PointOnPointContainment):    
-                    
                     showMessage(f"body contains point \n {point.getData()}")
                     showMessage(f"min {newBody.boundingBox.minPoint.getData()}")
                     showMessage(f"max {newBody.boundingBox.maxPoint.getData()}")
-                    
                     bodyHasAPoint = True
-                    lastFeature = newExtrude
-                    
+                    pointIndex = index
                     break
-
-            if not bodyHasAPoint:
+            if bodyHasAPoint:
+                copiedBodyToIntersect = copiedBodiesCol.item(pointIndex)
+                bodyCollection = adsk.core.ObjectCollection.create()
+                bodyCollection.add(copiedBodyToIntersect)
+                combineFeatureInput = features.combineFeatures.createInput(newBody, bodyCollection)
+                combineFeatureInput.operation = adsk.fusion.FeatureOperations.IntersectFeatureOperation
+                combineFeatureInput.isKeepToolBodies = False
+                newFeature = features.combineFeatures.add(combineFeatureInput)
+                lastFeature = newFeature
+            else: 
                 didDelete = newBody.deleteMe()
-                # showMessage(f"did delete body? {didDelete}  \n {newBody}")
-                
-
-
-            # check if any of the cached direction midpoints are inside the body
-            # If not, delete the body
-            # If so, intersect the body with the midpoint's associated body
 
 
 
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+    # Roll all new features above into a Custom feature
     custFeatInput = spawnBodyComp.features.customFeatures.createInput(_customFeatureDef)
     custFeatInput.addDependency('Sketch', sketch)
     custFeatInput.addDependency('SpawnBodyEdge', spawnEdge)
