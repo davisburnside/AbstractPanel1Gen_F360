@@ -256,30 +256,30 @@ def spawnBodyCopies(args):
                 )
 
             # Create a Matrix for movement & rotation of body
-            # matrix: adsk.core.Matrix3D = adsk.core.Matrix3D.create()
-            # rotationVector = vector = adsk.core.Vector3D.create(0, 0, 1)
-            # matrix.setToRotation(math.radians(angle), rotationVector, midpoint_spawnEdge)
-            # transformMatrix = adsk.core.Matrix3D.create()
-            # transformMatrix.translation = midpoint_spawnEdge.vectorTo(midpoint_sketchPoint)
-            # matrix.transformBy(transformMatrix)
+            matrix: adsk.core.Matrix3D = adsk.core.Matrix3D.create()
+            rotationVector = vector = adsk.core.Vector3D.create(0, 0, 1)
+            matrix.setToRotation(math.radians(angle), rotationVector, midpoint_spawnEdge)
+            transformMatrix = adsk.core.Matrix3D.create()
+            transformMatrix.translation = midpoint_spawnEdge.vectorTo(midpoint_sketchPoint)
+            matrix.transformBy(transformMatrix)
 
-            # # Create Copy / Paste Feature for Body
-            # newCopyFeature = spawnBodyComp.features.copyPasteBodies.add(spawnBody)
-            # baseBodyCopy = spawnBodyComp.bRepBodies.item(index + 1)
-            # baseBodyCopy.name = f"CopiedBody_{index}"
-            # if not firstFeature:
-            #     firstFeature = newCopyFeature
+            # Create Copy / Paste Feature for Body
+            newCopyFeature = spawnBodyComp.features.copyPasteBodies.add(spawnBody)
+            baseBodyCopy = spawnBodyComp.bRepBodies.item(index + 1)
+            baseBodyCopy.name = f"CopiedBody_{index}"
+            if not firstFeature:
+                firstFeature = newCopyFeature
 
-            # # # Create Movement Feature
-            # moveFeatures = spawnBodyComp.features.moveFeatures
-            # inputEnts = adsk.core.ObjectCollection.create()
-            # inputEnts.add(baseBodyCopy)
-            # moveInput = moveFeatures.createInput(inputEnts, matrix)
-            # moveFeature = moveFeatures.add(moveInput)
-            # lastFeature = moveFeature
+            # # Create Movement Feature
+            moveFeatures = spawnBodyComp.features.moveFeatures
+            inputEnts = adsk.core.ObjectCollection.create()
+            inputEnts.add(baseBodyCopy)
+            moveInput = moveFeatures.createInput(inputEnts, matrix)
+            moveFeature = moveFeatures.add(moveInput)
+            lastFeature = moveFeature
 
             directionLineMidpointsCol.add(midpoint_sketchPoint)
-            # copiedBodiesCol.add(baseBodyCopy)
+            copiedBodiesCol.add(baseBodyCopy)
 
 
 
@@ -311,9 +311,9 @@ def spawnBodyCopies(args):
          
             # Create Extrusion Feature and get new Body
             extrudes = spawnBodyComp.features.extrudeFeatures
-            showMessage(f"{_cellHeightInput} {_cellHeightInput.expression} ")
+            # showMessage(f"{_cellHeightInput} {_cellHeightInput.expression} ")
             distance = adsk.core.ValueInput.createByString(_cellHeightInput.expression)
-            showMessage(f"{distance},   {distance.stringValue}")
+            # showMessage(f"{distance},   {distance.stringValue}")
             newExtrude = extrudes.addSimple(profile, distance, adsk.fusion.FeatureOperations.NewBodyFeatureOperation)
             extrudedProfileBody: adsk.fusion.BRepBody = newExtrude.bodies.item(0)
             
@@ -326,76 +326,44 @@ def spawnBodyCopies(args):
                 pc: adsk.fusion.PointContainment = extrudedProfileBody.pointContainment(point)
                 if (pc == adsk.fusion.PointContainment.PointInsidePointContainment 
                     or pc == adsk.fusion.PointContainment.PointOnPointContainment):    
-                    # showMessage(f"body contains point \n {point.getData()}")
-                    # showMessage(f"min {extrudedProfileBody.boundingBox.minPoint.getData()}")
-                    # showMessage(f"max {extrudedProfileBody.boundingBox.maxPoint.getData()}")
                     bodyHasAPoint = True
                     pointIndex = index
                     break
+
+            # If there is a direction line present in a sketch profile's boundary    
             if bodyHasAPoint:
 
-                
-          
-
-
-
-
-                vecZ = adsk.core.Vector3D.create(0,0,1)
+                # identidy edges of top (+Z facing) face
                 edgeCollection = adsk.core.ObjectCollection.create()
+                vecZ = adsk.core.Vector3D.create(0,0,1)
                 faces = [f for f in extrudedProfileBody.faces if f.geometry.surfaceType == adsk.core.SurfaceTypes.PlaneSurfaceType]
                 for face in faces:
                     if vecZ.angleTo(face.geometry.normal) == 0:
-
-                        # showMessage(f"{vecZ.angleTo(face.geometry.normal)}")
-                        showMessage(f"{vecZ.angleTo(face.geometry.normal)},   {face.geometry.normal.asArray()}")
-                        showMessage(f"{face.classType()},   {face.edges.classType()}")
-
                         [edgeCollection.add(edge) for edge in face.edges]
                         break
 
-                # showMessage(f"faces {faceCollection.count}")
                 # Create the ChamferInput object.
                 chamferFeatureInput = spawnBodyComp.features.chamferFeatures.createInput2() 
-                offset = adsk.core.ValueInput.createByReal(0.3)
+                chamferOffset = adsk.core.ValueInput.createByReal(0.3)
+                chamferAngle = adsk.core.ValueInput.createByString(_cellChamferAngleInput.expression)
+                chamferOffset = adsk.core.ValueInput.createByString(_cellHeightInput.expression)
+                chamferFeatureInput.chamferEdgeSets.addDistanceAndAngleChamferEdgeSet(edgeCollection, chamferOffset, chamferAngle, True, True)
+                chamferFeature = spawnBodyComp.features.chamferFeatures.add(chamferFeatureInput) 
+                lastFeature = chamferFeature
 
-                chamferAngle = _cellChamferAngleInput.value 
-                offset = _cellHeightInput.value
-                showMessage(f"{chamferAngle},   {offset}")
+                # Intersect with Copied Body
+                copiedBodyToIntersect = copiedBodiesCol.item(pointIndex)
+                bodyCollection = adsk.core.ObjectCollection.create()
+                bodyCollection.add(copiedBodyToIntersect)
+                combineFeatureInput = features.combineFeatures.createInput(extrudedProfileBody, bodyCollection)
+                combineFeatureInput.operation = adsk.fusion.FeatureOperations.IntersectFeatureOperation
+                combineFeatureInput.isKeepToolBodies = False
+                newCombineFeature = features.combineFeatures.add(combineFeatureInput)
+                lastFeature = newCombineFeature
 
-                # chamferFeatureInput.chamferEdgeSets.addDistanceAndAngleChamferEdgeSet(edgeCollection, offset, chamferAngle, True, True)
-                # chamferFeature = spawnBodyComp.features.chamferFeatures.add(chamferFeatureInput) 
-                # lastFeature = chamferFeature
-
-
-
-
-                # copiedBodyToIntersect = copiedBodiesCol.item(pointIndex)
-                # bodyCollection = adsk.core.ObjectCollection.create()
-                # bodyCollection.add(copiedBodyToIntersect)
-                # combineFeatureInput = features.combineFeatures.createInput(extrudedProfileBody, bodyCollection)
-                # combineFeatureInput.operation = adsk.fusion.FeatureOperations.IntersectFeatureOperation
-                # combineFeatureInput.isKeepToolBodies = False
-                # newCombineFeature = features.combineFeatures.add(combineFeatureInput)
-                # lastFeature = newCombineFeature
+            # If not, delete the extruded body (No direction line associated with the Sketch Profile)
             else: 
                 didDelete = extrudedProfileBody.deleteMe()
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
     # Roll all new features above into a Custom feature
     custFeatInput = spawnBodyComp.features.customFeatures.createInput(_customFeatureDef)
