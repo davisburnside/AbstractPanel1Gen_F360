@@ -96,22 +96,20 @@ class CreatePocketCommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
 
             global _directionSketchSelectInput, _boundarySketchSelectInput, _cellChamferAngleInput, _cellHeightInput, _spawnBodyEdgeSelectInput, _lengthInput, _widthInput, _depthInput, _radiusInput
 
-            # Create the selection input to select the body(s).
-            inputs.addSelectionInput
+            # Define Command Inputs
+            _boundarySketchSelectInput = inputs.addSelectionInput('selectBoundarySketch', 
+                                                        'BoundarySketch', 
+                                                        'desc desc')
+            _boundarySketchSelectInput.addSelectionFilter('Sketches')
+            _boundarySketchSelectInput.tooltip = 'desc'
+            _boundarySketchSelectInput.setSelectionLimits(1, 1)
+
             _directionSketchSelectInput = inputs.addSelectionInput('selectDirectionSketch', 
                                                          'DirectionSketch', 
                                                          'desc desc')
             _directionSketchSelectInput.addSelectionFilter('Sketches')
             _directionSketchSelectInput.tooltip = 'desc'
             _directionSketchSelectInput.setSelectionLimits(1, 1)
-
-            
-            _boundarySketchSelectInput = inputs.addSelectionInput('selectBoundarySketch', 
-                                                         'BoundarySketch', 
-                                                         'desc desc')
-            _boundarySketchSelectInput.addSelectionFilter('Sketches')
-            _boundarySketchSelectInput.tooltip = 'desc'
-            _boundarySketchSelectInput.setSelectionLimits(1, 1)
 
             _spawnBodyEdgeSelectInput = inputs.addSelectionInput('selectSpawnBodyEdge', 
                                                          'SpawnBodyEdge', 
@@ -120,10 +118,9 @@ class CreatePocketCommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
             _spawnBodyEdgeSelectInput.tooltip = 'desc'
             _spawnBodyEdgeSelectInput.setSelectionLimits(1, 1)
 
-            # length = adsk.core.ValueInput.createByReal(5)
             default = adsk.core.ValueInput.createByReal(1)
             _cellHeightInput = inputs.addDistanceValueCommandInput('cellHeightInput', 'cellHeightInput', default)
-
+            
             default = adsk.core.ValueInput.createByString("30 deg")
             _cellChamferAngleInput = inputs.addAngleValueCommandInput('cellChamferAngleInput', 'cellChamferAngleInput', default)
 
@@ -154,8 +151,6 @@ class CreateExecuteHandler(adsk.core.CommandEventHandler):
 
             directionLineMidpointsCol, copiedBodiesCol = spawnBodyCopies(args)
 
-            # intersectBodiesWithSketchProfiles(args, directionLineMidpointsCol, copiedBodiesCol)
-
             showMessage(f"hit 3")
 
         except:
@@ -183,11 +178,10 @@ class ComputeCustomFeature(adsk.fusion.CustomFeatureEventHandler):
         try:
             eventArgs: adsk.fusion.CustomFeatureEventArgs = args
 
-            # showMessage(f"hit 1b")
+            showMessage(f"ComputeCustomFeature(adsk.fusion.CustomFeatureEventHandler)")
 
             # directionLineMidpointsCol, copiedBodiesCol = spawnBodyCopies(args)
 
-            # intersectBodiesWithSketchProfiles(args, directionLineMidpointsCol, copiedBodiesCol)
 
             # showMessage(f"hit 3b")
 
@@ -232,7 +226,7 @@ def spawnBodyCopies(args):
             skPtEndData = line.endSketchPoint.geometry.getData()
             deltaX = -skPtStartData[1] + skPtEndData[1]
             deltaY = -skPtStartData[2] + skPtEndData[2]
-            angle = math.degrees(math.atan2(deltaY, deltaX))
+            angle = 90 + math.degrees(math.atan2(deltaY, deltaX))
 
             # showMessage(f"{skPtStartData}, {skPtEndData}")
             # showMessage(f"{angle}, {deltaX}, {deltaY}")
@@ -254,6 +248,9 @@ def spawnBodyCopies(args):
                 (spawnEdgeStartVert[2] + spawnEdgeEndVert[2]) / 2, 
                 (spawnEdgeStartVert[3] + spawnEdgeEndVert[3]) / 2
                 )
+
+
+
 
             # Create a Matrix for movement & rotation of body
             matrix: adsk.core.Matrix3D = adsk.core.Matrix3D.create()
@@ -281,12 +278,7 @@ def spawnBodyCopies(args):
             directionLineMidpointsCol.add(midpoint_sketchPoint)
             copiedBodiesCol.add(baseBodyCopy)
 
-
-
-            # newOcc = rootComp.occurrences.addExistingComponent (spawnBodyComp, trans)
-            # newBody = newOcc.bRepBodies.item(0)
-
-
+ 
 
 
 
@@ -373,64 +365,6 @@ def spawnBodyCopies(args):
     spawnBodyComp.features.customFeatures.add(custFeatInput)
 
     return directionLineMidpointsCol, copiedBodiesCol
-
-def intersectBodiesWithSketchProfiles(args, directionLineMidpointsCol, copiedBodiesCol):
-
-    showMessage(f"hit 2")
-
-    eventArgs = adsk.core.CommandEventArgs.cast(args)    
-
-    design: adsk.fusion.Design = _app.activeProduct
-    rootComp = design.rootComponent
-    spawnEdge = _spawnBodyEdgeSelectInput.selection(0).entity
-    spawnBody = spawnEdge.body
-    spawnBodyComp = spawnBody.parentComponent
-    features = rootComp.features
-
-
-    # Things to consider:
-    #   I can't check if a point lies inside a profile, but I can check if it lies inside a bRedBody
-    #       BRepBody.pointContainment s
-
-    # Make a map associating each direction line midpoint with a new copied body
-    # Extrude all sketch profiles except boundary
-    # For each direction line midpoint, determine which new body it lies inside.
-    # Use that body to intersect with the copied body associated with direction line 
-
-    boundaryProfile: adsk.fusion.Profile = _boundarySketchSelectInput.selection(0).entity
-
-    for profile in boundaryProfile.parentSketch.profiles:
-        
-        if profile != boundaryProfile:
-
-            baseFeats = features.baseFeatures
-            baseFeat = baseFeats.add()
-            
-            baseFeat.startEdit()
-
-            # Create an extrusion input to be able to define the input needed for an extrusion
-        # while specifying the profile and that a new component is to be created
-            extrudes = rootComp.features.extrudeFeatures
-            extInput = extrudes.createInput(profile, adsk.fusion.FeatureOperations.NewBodyFeatureOperation)
-
-            # Define that the extent is a distance extent of 5 cm.
-            distance = adsk.core.ValueInput.createByReal(5)
-            extInput.setDistanceExtent(False, distance)
-            extInput.baseFeature = baseFeat
-
-            ext = extrudes.add(extInput)
-
-
-        # ent_boundaryProfile = design.findEntityByToken(boundaryProfile)
-        # ent_profile = design.findEntityByToken(boundaryProfile)
-        # profile
-
-        # extrudeFeats = features.extrudeFeatures
-        # extrudeFeatureInput = extrudeFeats.createInput(entities0, adsk.fusion.FeatureOperations.NewBodyFeatureOperation)
-        # extrudeFeatureInput.isSolid = True
-        # extrudeFeatureInput.setDistanceExtent(False, adsk.core.ValueInput.createByReal(2.0))
-        # extrudeFeature = extrudeFeats.add(extrudeFeatureInput)
-
 
 def showMessage(message, error = False):
     textPalette: adsk.core.TextCommandPalette = _ui.palettes.itemById('TextCommands')
