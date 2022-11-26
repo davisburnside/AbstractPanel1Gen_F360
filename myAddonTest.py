@@ -190,6 +190,8 @@ class ComputeCustomFeature(adsk.fusion.CustomFeatureEventHandler):
 
 def spawnBodyCopies(args):
 
+    showMessage(f"HIT 1")
+
     eventArgs = adsk.core.CommandEventArgs.cast(args)        
 
     # Get the settings from the inputs.
@@ -249,9 +251,6 @@ def spawnBodyCopies(args):
                 (spawnEdgeStartVert[3] + spawnEdgeEndVert[3]) / 2
                 )
 
-
-
-
             # Create a Matrix for movement & rotation of body
             matrix: adsk.core.Matrix3D = adsk.core.Matrix3D.create()
             rotationVector = vector = adsk.core.Vector3D.create(0, 0, 1)
@@ -278,12 +277,13 @@ def spawnBodyCopies(args):
             directionLineMidpointsCol.add(midpoint_sketchPoint)
             copiedBodiesCol.add(baseBodyCopy)
 
- 
+    showMessage(f"HIT 2")
 
 
 
 
-
+Why don't I just get the profile underneath the current point?
+I don't need to cycle through every one
 
 
 
@@ -300,62 +300,75 @@ def spawnBodyCopies(args):
     boundarySketch: adsk.fusion.Profile = _boundarySketchSelectInput.selection(0).entity
     for profile in boundarySketch.profiles:
         # if profile != boundaryProfile:
-         
-            # Create Extrusion Feature and get new Body
-            extrudes = spawnBodyComp.features.extrudeFeatures
-            # showMessage(f"{_cellHeightInput} {_cellHeightInput.expression} ")
-            distance = adsk.core.ValueInput.createByString(_cellHeightInput.expression)
-            # showMessage(f"{distance},   {distance.stringValue}")
-            newExtrude = extrudes.addSimple(profile, distance, adsk.fusion.FeatureOperations.NewBodyFeatureOperation)
-            extrudedProfileBody: adsk.fusion.BRepBody = newExtrude.bodies.item(0)
-            
-            # Check if the new body contains/touches any direction line midpoints
-            # If so, make an Intersect Feature between the extruded body & copied Body
-            # If not, delete the new body
-            bodyHasAPoint = False
-            pointIndex = -1
+
+
+            profileBoundingBoxContainsDirectionLine = True
+            boundBox = profile.boundingBox
+            showMessage(f"\n\n max: {boundBox.maxPoint.getData()}\nmin: {boundBox.minPoint.getData()}")
             for index, point in enumerate(directionLineMidpointsCol):
-                pc: adsk.fusion.PointContainment = extrudedProfileBody.pointContainment(point)
-                if (pc == adsk.fusion.PointContainment.PointInsidePointContainment 
-                    or pc == adsk.fusion.PointContainment.PointOnPointContainment):    
-                    bodyHasAPoint = True
-                    pointIndex = index
-                    break
+                showMessage(f" point: {point.getData()}")
+                showMessage(f"Contains? {boundBox.contains(point)}\n")
 
-            # If there is a direction line present in a sketch profile's boundary    
-            if bodyHasAPoint:
+            if profileBoundingBoxContainsDirectionLine:
 
-                # identidy edges of top (+Z facing) face
-                edgeCollection = adsk.core.ObjectCollection.create()
-                vecZ = adsk.core.Vector3D.create(0,0,1)
-                faces = [f for f in extrudedProfileBody.faces if f.geometry.surfaceType == adsk.core.SurfaceTypes.PlaneSurfaceType]
-                for face in faces:
-                    if vecZ.angleTo(face.geometry.normal) == 0:
-                        [edgeCollection.add(edge) for edge in face.edges]
+            
+                # Create Extrusion Feature and get new Body
+                extrudes = spawnBodyComp.features.extrudeFeatures
+                # showMessage(f"{_cellHeightInput} {_cellHeightInput.expression} ")
+                distance = adsk.core.ValueInput.createByString(_cellHeightInput.expression)
+                # showMessage(f"{distance},   {distance.stringValue}")
+                newExtrude = extrudes.addSimple(profile, distance, adsk.fusion.FeatureOperations.NewBodyFeatureOperation)
+                extrudedProfileBody: adsk.fusion.BRepBody = newExtrude.bodies.item(0)
+                
+                # Check if the new body contains/touches any direction line midpoints
+                # If so, make an Intersect Feature between the extruded body & copied Body
+                # If not, delete the new body
+                bodyHasAPoint = False
+                pointIndex = -1
+                for index, point in enumerate(directionLineMidpointsCol):
+                    pc: adsk.fusion.PointContainment = extrudedProfileBody.pointContainment(point)
+                    if (pc == adsk.fusion.PointContainment.PointInsidePointContainment 
+                        or pc == adsk.fusion.PointContainment.PointOnPointContainment):    
+                        bodyHasAPoint = True
+                        pointIndex = index
                         break
 
-                # Create the ChamferInput object.
-                chamferFeatureInput = spawnBodyComp.features.chamferFeatures.createInput2() 
-                chamferOffset = adsk.core.ValueInput.createByReal(0.3)
-                chamferAngle = adsk.core.ValueInput.createByString(_cellChamferAngleInput.expression)
-                chamferOffset = adsk.core.ValueInput.createByString(_cellHeightInput.expression)
-                chamferFeatureInput.chamferEdgeSets.addDistanceAndAngleChamferEdgeSet(edgeCollection, chamferOffset, chamferAngle, True, True)
-                chamferFeature = spawnBodyComp.features.chamferFeatures.add(chamferFeatureInput) 
-                lastFeature = chamferFeature
+                # If there is a direction line present in a sketch profile's boundary    
+                if bodyHasAPoint:
 
-                # Intersect with Copied Body
-                copiedBodyToIntersect = copiedBodiesCol.item(pointIndex)
-                bodyCollection = adsk.core.ObjectCollection.create()
-                bodyCollection.add(copiedBodyToIntersect)
-                combineFeatureInput = features.combineFeatures.createInput(extrudedProfileBody, bodyCollection)
-                combineFeatureInput.operation = adsk.fusion.FeatureOperations.IntersectFeatureOperation
-                combineFeatureInput.isKeepToolBodies = False
-                newCombineFeature = features.combineFeatures.add(combineFeatureInput)
-                lastFeature = newCombineFeature
+                    # identidy edges of top (+Z facing) face
+                    edgeCollection = adsk.core.ObjectCollection.create()
+                    vecZ = adsk.core.Vector3D.create(0,0,1)
+                    faces = [f for f in extrudedProfileBody.faces if f.geometry.surfaceType == adsk.core.SurfaceTypes.PlaneSurfaceType]
+                    for face in faces:
+                        if vecZ.angleTo(face.geometry.normal) == 0:
+                            [edgeCollection.add(edge) for edge in face.edges]
+                            break
 
-            # If not, delete the extruded body (No direction line associated with the Sketch Profile)
-            else: 
-                didDelete = extrudedProfileBody.deleteMe()
+                    # Create the ChamferInput object.
+                    chamferFeatureInput = spawnBodyComp.features.chamferFeatures.createInput2() 
+                    chamferOffset = adsk.core.ValueInput.createByReal(0.3)
+                    chamferAngle = adsk.core.ValueInput.createByString(_cellChamferAngleInput.expression)
+                    chamferOffset = adsk.core.ValueInput.createByString(_cellHeightInput.expression)
+                    chamferFeatureInput.chamferEdgeSets.addDistanceAndAngleChamferEdgeSet(edgeCollection, chamferOffset, chamferAngle, True, True)
+                    chamferFeature = spawnBodyComp.features.chamferFeatures.add(chamferFeatureInput) 
+                    lastFeature = chamferFeature
+
+                    # Intersect with Copied Body
+                    copiedBodyToIntersect = copiedBodiesCol.item(pointIndex)
+                    bodyCollection = adsk.core.ObjectCollection.create()
+                    bodyCollection.add(copiedBodyToIntersect)
+                    combineFeatureInput = features.combineFeatures.createInput(extrudedProfileBody, bodyCollection)
+                    combineFeatureInput.operation = adsk.fusion.FeatureOperations.IntersectFeatureOperation
+                    combineFeatureInput.isKeepToolBodies = False
+                    newCombineFeature = features.combineFeatures.add(combineFeatureInput)
+                    lastFeature = newCombineFeature
+
+                # If not, delete the extruded body (No direction line associated with the Sketch Profile)
+                else: 
+                    didDelete = extrudedProfileBody.deleteMe()
+
+                showMessage(f"HIT 3")
 
     # Roll all new features above into a Custom feature
     custFeatInput = spawnBodyComp.features.customFeatures.createInput(_customFeatureDef)
@@ -363,6 +376,8 @@ def spawnBodyCopies(args):
     custFeatInput.addDependency('SpawnBodyEdge', spawnEdge)
     custFeatInput.setStartAndEndFeatures(firstFeature, lastFeature)
     spawnBodyComp.features.customFeatures.add(custFeatInput)
+
+    showMessage(f"HIT 4")
 
     return directionLineMidpointsCol, copiedBodiesCol
 
