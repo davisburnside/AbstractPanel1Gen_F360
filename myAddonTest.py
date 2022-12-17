@@ -233,6 +233,8 @@ class ComputeCustomFeature(adsk.fusion.CustomFeatureEventHandler):
 
 def spawnBodyCopies(args):
 
+    showMessage("HIT 1")
+
     app = adsk.core.Application.get() 
     design = adsk.fusion.Design.cast(app.activeProduct) 
     root = design.rootComponent
@@ -321,29 +323,25 @@ def spawnBodyCopies(args):
             directionLineMidpointsCol.add(midpoint_sketchPoint)
             copiedBodiesCol.add(baseBodyCopy)
 
+    showMessage("HIT 2")
+
     # Next, iterate through all Sketch profile in the "Cell Boundaries" Sketch
     allNewBodies = adsk.core.ObjectCollection.create()
     boundarySketch: adsk.fusion.Profile = _boundarySketchSelectInput.selection(0).entity
     for profile in boundarySketch.profiles:
 
         # Get Profile's BoundingBox X & Y
-        # If that box contains a DirectionLine Midpoint, continue
-        profile: adsk.fusion.Profile = profile
-        profile.boundingBox.isValid
-
+        # If that box does contains a direction Line's Midpoint, do not extrude it
+        # This step acts to prevent too many extrusions from being created for complicated cell patterns
         profileBoundingBoxContainsDirectionLine = False
         profileBoundBoxMinPnt, profileBoundBoxMaxPnt = getPreciseBoundingBox3D(profile)
-
         for index, point in enumerate(directionLineMidpointsCol):
-
             _, pointX, pointY, pointZ = point.getData()
-
-            # showMessage(f" point: {x},{y},{z} Inside box {profileBoundBoxMinPnt.getData()}, {profileBoundBoxMaxPnt.getData()}")
             if (pointX >= profileBoundBoxMinPnt.x and pointX <= profileBoundBoxMaxPnt.x
                 and pointY >= profileBoundBoxMinPnt.y and pointY <= profileBoundBoxMaxPnt.y):
 
                 profileBoundingBoxContainsDirectionLine = True
-                # showMessage(f" point: [{pointX},{pointY},{pointZ}] Is inside box [{profileBoundBoxMinPnt.x},{profileBoundBoxMinPnt.y}], [{profileBoundBoxMaxPnt.x},{profileBoundBoxMaxPnt.y}]")
+                showMessage(f" point: [{pointX},{pointY}] is inside box with min&max bounds of [{profileBoundBoxMinPnt.x},{profileBoundBoxMinPnt.y}] & [{profileBoundBoxMaxPnt.x},{profileBoundBoxMaxPnt.y}]")
                 break
 
         if profileBoundingBoxContainsDirectionLine:
@@ -382,7 +380,6 @@ def spawnBodyCopies(args):
 
                 # Create the ChamferInput object.
                 chamferFeatureInput = spawnBodyComp.features.chamferFeatures.createInput2() 
-                chamferOffset = adsk.core.ValueInput.createByReal(0.3)
                 chamferAngle = adsk.core.ValueInput.createByString(_cellChamferAngleInput.expression)
                 chamferOffset = adsk.core.ValueInput.createByString(_cellHeightInput.expression)
                 chamferFeatureInput.chamferEdgeSets.addDistanceAndAngleChamferEdgeSet(edgeCollection, chamferOffset, chamferAngle, True, True)
@@ -399,27 +396,27 @@ def spawnBodyCopies(args):
                 newCombineFeature: adsk.fusion.CombineFeature = features.combineFeatures.add(combineFeatureInput)
                 lastFeature = newCombineFeature
 
+                # add new body to Collection, for use after current loop finishes
                 allNewBodies.add(newCombineFeature.bodies.item(0))
 
             # If not, delete the extruded body (No direction line associated with the Sketch Profile)
             elif extrudedProfileBody: 
-                # showMessage(f"Delete extruded body")
                 didDelete = extrudedProfileBody.deleteMe()
 
-    # Move all new Bodies to a new Collection
-    newParentComponentOccurence = None 
+    # Move all new Bodies to a new Collection & record the move as a Feature
+    allCompNames = [design.allComponents.item(i).name for i in range(design.allComponents.count)]
+    nameIndex = 1
+    newCompName = f"Copied Bodies {nameIndex}"
+    while f"Copied Bodies {nameIndex}" in allCompNames:
+        nameIndex += 1
+        newCompName = f"Copied Bodies {nameIndex}"
     newParentComponent = root.occurrences.addNewComponent(adsk.core.Matrix3D.create()) 
-    newParentComponent.component.name = "Copied Bodies"
-
-    # sourceBodies = adsk.core.ObjectCollection.create()
+    newParentComponent.component.name = newCompName
     toNewComponentFeature = newParentComponent.component.features.cutPasteBodies.add(allNewBodies)
-    showMessage(f"{toNewComponentFeature}")
     lastFeature = toNewComponentFeature
 
     # Roll all new features above into a Custom feature
-    custFeatInput = rootComp.features.customFeatures.createInput(_customFeatureDef)
-    custFeatInput.addDependency('Sketch', sketch)
-    custFeatInput.addDependency('SpawnBody', spawnBody)
+    custFeatInput = newParentComponent.component.features.customFeatures.createInput(_customFeatureDef)
     custFeatInput.setStartAndEndFeatures(firstFeature, lastFeature)
     spawnBodyComp.features.customFeatures.add(custFeatInput)
 
