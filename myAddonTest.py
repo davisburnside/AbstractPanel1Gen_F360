@@ -187,17 +187,15 @@ class CreatePocketCommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
 
 # Event handler for the execute event of the create command.
 class CreateExecuteHandler(adsk.core.CommandEventHandler):
+
     def __init__(self):
+
         super().__init__()
     def notify(self, args):
+
         try:
             eventArgs: adsk.fusion.CustomFeatureEventArgs = args
-
-            showMessage(f"hit 1")
-
             directionLineMidpointsCol, copiedBodiesCol = spawnBodyCopies(args)
-
-            showMessage(f"hit 3")
 
         except:
             eventArgs.executeFailed = True
@@ -234,8 +232,6 @@ class ComputeCustomFeature(adsk.fusion.CustomFeatureEventHandler):
             showMessage('CustomFeatureCompute: {}\n'.format(traceback.format_exc()))
 
 def spawnBodyCopies(args):
-
-    showMessage(f"HIT 1")
 
     eventArgs = adsk.core.CommandEventArgs.cast(args)        
 
@@ -305,6 +301,7 @@ def spawnBodyCopies(args):
             yVal = (boundBox.minPoint.y + boundBox.maxPoint.y ) / 2
             xVal = (boundBox.minPoint.x + boundBox.maxPoint.x ) / 2
             midpoint_spawnBodyBottom = adsk.core.Point3D.create(xVal, yVal, zVal)
+
             # for face in faces:
             #     showMessage(face.normal.angleTo(negZVector))
 
@@ -338,26 +335,8 @@ def spawnBodyCopies(args):
             directionLineMidpointsCol.add(midpoint_sketchPoint)
             copiedBodiesCol.add(baseBodyCopy)
 
-    showMessage(f"HIT 2")
-
-
-
-
-# Why don't I just get the profile underneath the current point?
-# I don't need to cycle through every one
-
-
-
-
-
-
-
-
-
-
-
-
-
+    # Next, iterate through all Sketch profile in the "Cell Boundaries" Sketch
+    allNewBodies = adsk.core.ObjectCollection.create()
     boundarySketch: adsk.fusion.Profile = _boundarySketchSelectInput.selection(0).entity
     for profile in boundarySketch.profiles:
 
@@ -374,7 +353,7 @@ def spawnBodyCopies(args):
         for index, point in enumerate(directionLineMidpointsCol):
             # showMessage(f"{point.getData().x}")
 
-            _, pointX, pointY, _ = point.getData()
+            _, pointX, pointY, pointZ = point.getData()
 
             # showMessage(f" point: {x},{y},{z} Inside box {profileBoundBoxMinPnt.getData()}, {profileBoundBoxMaxPnt.getData()}")
 
@@ -383,20 +362,37 @@ def spawnBodyCopies(args):
 
                 # midpoint_spawnBody = adsk.core.Point3D.create(xVal, yVal, zVal)
                 profileBoundingBoxContainsDirectionLine = True
-                showMessage("Condition fulfilled ================================")
-                showMessage(f" point: [{pointX},{pointY}] Is inside box [{profileBoundBoxMinPnt.x},{profileBoundBoxMinPnt.y}], [{profileBoundBoxMaxPnt.x},{profileBoundBoxMaxPnt.y}]")
+                # showMessage("Condition fulfilled ================================")
+                # showMessage(f" point: [{pointX},{pointY},{pointZ}] Is inside box [{profileBoundBoxMinPnt.x},{profileBoundBoxMinPnt.y}], [{profileBoundBoxMaxPnt.x},{profileBoundBoxMaxPnt.y}]")
                 break
 
         if profileBoundingBoxContainsDirectionLine:
 
             # Create Extrusion Feature and get new Body
             extrudes = spawnBodyComp.features.extrudeFeatures
-            # showMessage(f"{_cellHeightInput} {_cellHeightInput.expression} ")
             distance = adsk.core.ValueInput.createByString(_cellHeightInput.expression)
-            # showMessage(f"{distance},   {distance.stringValue}")
+            # distance = adsk.core.ValueInput.createByString("2 in")
+
             newExtrude = extrudes.addSimple(profile, distance, adsk.fusion.FeatureOperations.NewBodyFeatureOperation)
-            showMessage(f"{newExtrude}")
             extrudedProfileBody: adsk.fusion.BRepBody = newExtrude.bodies.item(0)
+
+            # if not newParentComponentOccurence:
+
+            #     ## newBody = extrudedProfileBody.createComponent()
+            #     ## newParentComponentOccurence = newBody.parentComponent
+
+            #     app = adsk.core.Application.get() 
+            #     design = adsk.fusion.Design.cast(app.activeProduct) 
+            #     root = design.rootComponent 
+            #     newParentComponentOccurence = root.occurrences.addNewComponent(adsk.core.Matrix3D.create()) 
+            #     newParentComponentOccurence.isLightBulbOn = False
+
+            #     showMessage(f"{newParentComponentOccurence.bRepBodies.count}")
+            #     # extrudedProfileBody = newParentComponentOccurence.bRepBodies.item(0)
+
+            #     showMessage(f"{newParentComponentOccurence}, {newParentComponentOccurence.name}")
+            # else:
+            #     extrudedProfileBody = extrudedProfileBody.moveToComponent(newParentComponentOccurence)
             
             # Check if the new body contains/touches any direction line midpoints
             # If so, make an Intersect Feature between the extruded body & copied Body
@@ -404,11 +400,9 @@ def spawnBodyCopies(args):
             bodyHasAPoint = False
             pointIndex = -1
             for index, point in enumerate(directionLineMidpointsCol):
-
-                point = adsk.core.Point3D.create(point.x, point.y, point.z)
-
                 pc: adsk.fusion.PointContainment = extrudedProfileBody.pointContainment(point)
-                showMessage(f"{extrudedProfileBody.name},      {pc},      {point.getData()},  {extrudedProfileBody.boundingBox.minPoint.getData()}, {extrudedProfileBody.boundingBox.maxPoint.getData()} ")
+                # showMessage(f"{extrudedProfileBody.name},      {pc},      {point.getData()},  {extrudedProfileBody.boundingBox.minPoint.getData()}, {extrudedProfileBody.boundingBox.maxPoint.getData()} ")
+                showMessage(f"{pc},      {point.getData()},  {extrudedProfileBody.boundingBox.minPoint.getData()}, {extrudedProfileBody.boundingBox.maxPoint.getData()} ")
                 if (pc == adsk.fusion.PointContainment.PointInsidePointContainment 
                     or pc == adsk.fusion.PointContainment.PointOnPointContainment):    
                     bodyHasAPoint = True
@@ -418,7 +412,7 @@ def spawnBodyCopies(args):
             # If there is a direction line present in a sketch profile's boundary    
             if bodyHasAPoint:
 
-                # identidy edges of top (+Z facing) face
+                # identify edges of top (+Z facing) face
                 edgeCollection = adsk.core.ObjectCollection.create()
                 vecZ = adsk.core.Vector3D.create(0,0,1)
                 faces = [f for f in extrudedProfileBody.faces if f.geometry.surfaceType == adsk.core.SurfaceTypes.PlaneSurfaceType]
@@ -428,13 +422,13 @@ def spawnBodyCopies(args):
                         break
 
                 # Create the ChamferInput object.
-                # chamferFeatureInput = spawnBodyComp.features.chamferFeatures.createInput2() 
-                # chamferOffset = adsk.core.ValueInput.createByReal(0.3)
-                # chamferAngle = adsk.core.ValueInput.createByString(_cellChamferAngleInput.expression)
-                # chamferOffset = adsk.core.ValueInput.createByString(_cellHeightInput.expression)
-                # chamferFeatureInput.chamferEdgeSets.addDistanceAndAngleChamferEdgeSet(edgeCollection, chamferOffset, chamferAngle, True, True)
-                # chamferFeature = spawnBodyComp.features.chamferFeatures.add(chamferFeatureInput) 
-                # lastFeature = chamferFeature
+                chamferFeatureInput = spawnBodyComp.features.chamferFeatures.createInput2() 
+                chamferOffset = adsk.core.ValueInput.createByReal(0.3)
+                chamferAngle = adsk.core.ValueInput.createByString(_cellChamferAngleInput.expression)
+                chamferOffset = adsk.core.ValueInput.createByString(_cellHeightInput.expression)
+                chamferFeatureInput.chamferEdgeSets.addDistanceAndAngleChamferEdgeSet(edgeCollection, chamferOffset, chamferAngle, True, True)
+                chamferFeature = spawnBodyComp.features.chamferFeatures.add(chamferFeatureInput) 
+                lastFeature = chamferFeature
 
                 # Intersect with Copied Body
                 copiedBodyToIntersect = copiedBodiesCol.item(pointIndex)
@@ -443,15 +437,37 @@ def spawnBodyCopies(args):
                 combineFeatureInput = features.combineFeatures.createInput(extrudedProfileBody, bodyCollection)
                 combineFeatureInput.operation = adsk.fusion.FeatureOperations.IntersectFeatureOperation
                 combineFeatureInput.isKeepToolBodies = False
-                newCombineFeature = features.combineFeatures.add(combineFeatureInput)
+                newCombineFeature: adsk.fusion.CombineFeature = features.combineFeatures.add(combineFeatureInput)
                 lastFeature = newCombineFeature
 
-            # If not, delete the extruded body (No direction line associated with the Sketch Profile)
-            else: 
-                showMessage(f"Delete extruded body")
-                # didDelete = extrudedProfileBody.deleteMe()
+                allNewBodies.add(newCombineFeature.bodies.item(0))
 
-            showMessage(f"HIT 3")
+            # If not, delete the extruded body (No direction line associated with the Sketch Profile)
+            elif extrudedProfileBody: 
+                showMessage(f"Delete extruded body")
+                didDelete = extrudedProfileBody.deleteMe()
+
+    # Move all new Bodies to a new Collection
+    showMessage(f"{allNewBodies.count}")
+    newParentComponentOccurence = None
+    for index in range(allNewBodies.count):
+        body = allNewBodies.item(index)
+    
+        if not newParentComponentOccurence:
+
+            app = adsk.core.Application.get() 
+            design = adsk.fusion.Design.cast(app.activeProduct) 
+            root = design.rootComponent 
+            newParentComponentOccurence = root.occurrences.addNewComponent(adsk.core.Matrix3D.create()) 
+            newParentComponentOccurence.name = "Copied Bodies"
+            # newParentComponentOccurence.isLightBulbOn = False
+            # showMessage(f"{newParentComponentOccurence}, {newParentComponentOccurence.name}")
+        # else:
+        body.moveToComponent(newParentComponentOccurence)
+
+        showMessage(f"{newParentComponentOccurence.bRepBodies.count}")
+
+    
 
     # Roll all new features above into a Custom feature
     custFeatInput = spawnBodyComp.features.customFeatures.createInput(_customFeatureDef)
@@ -459,8 +475,6 @@ def spawnBodyCopies(args):
     custFeatInput.addDependency('SpawnBody', spawnBody)
     custFeatInput.setStartAndEndFeatures(firstFeature, lastFeature)
     spawnBodyComp.features.customFeatures.add(custFeatInput)
-
-    showMessage(f"HIT 4")
 
     return directionLineMidpointsCol, copiedBodiesCol
 
