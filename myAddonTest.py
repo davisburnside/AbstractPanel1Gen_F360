@@ -12,6 +12,7 @@ _customFeatureDef: adsk.fusion.CustomFeature = None
 _directionSketchSelectInput: adsk.core.SelectionCommandInput = None
 _boundarySketchSelectInput: adsk.core.SelectionCommandInput = None
 _spawnBodySelectInput: adsk.core.SelectionCommandInput = None
+_destPlaneInput: adsk.core.SelectionCommandInput = None
 _cellHeightInput: adsk.core.ValueCommandInput = None
 _cellChamferAngleInput: adsk.core.ValueCommandInput = None
 
@@ -142,7 +143,16 @@ class CreatePocketCommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
             inputs = cmd.commandInputs
             des: adsk.fusion.Design = _app.activeProduct
 
-            global _directionSketchSelectInput, _boundarySketchSelectInput, _cellChamferAngleInput, _cellHeightInput, _spawnBodySelectInput, _lengthInput, _widthInput, _depthInput, _radiusInput
+            global _directionSketchSelectInput
+            global _boundarySketchSelectInput 
+            global _cellChamferAngleInput 
+            global _cellHeightInput
+            global _spawnBodySelectInput 
+            global _destPlaneInput
+            # _lengthInput
+            # _widthInput
+            # depthInput
+            # _radiusInput
 
             # Define Command Inputs
             _boundarySketchSelectInput = inputs.addSelectionInput('selectBoundarySketch', 
@@ -159,9 +169,16 @@ class CreatePocketCommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
             _directionSketchSelectInput.tooltip = 'desc'
             _directionSketchSelectInput.setSelectionLimits(1, 1)
 
+            _destPlaneInput = inputs.addSelectionInput('selectDestPlane', 
+                                                'DestPlane', 
+                                                'desc desc')
+            _destPlaneInput.addSelectionFilter('Profiles')
+            _destPlaneInput.tooltip = 'desc'
+            _destPlaneInput.setSelectionLimits(1, 1)
+
             _spawnBodySelectInput = inputs.addSelectionInput('selectSpawnBody', 
-                                                         'SpawnBody', 
-                                                         'desc desc')
+                                                'SpawnBody', 
+                                                'desc desc')
             _spawnBodySelectInput.addSelectionFilter('Bodies')
             _spawnBodySelectInput.tooltip = 'desc'
             _spawnBodySelectInput.setSelectionLimits(1, 1)
@@ -231,6 +248,15 @@ class ComputeCustomFeature(adsk.fusion.CustomFeatureEventHandler):
         except:
             showMessage('CustomFeatureCompute: {}\n'.format(traceback.format_exc()))
 
+def getBodyBottomFace(bRepBody):
+
+    vecZ = adsk.core.Vector3D.create(0,0,-1)
+    faces = [f for f in bRepBody.faces if f.geometry.surfaceType == adsk.core.SurfaceTypes.PlaneSurfaceType]
+    for face in faces:
+        showMessage(f"{face.geometry.normal.x}, {face.geometry.normal.y}, {face.geometry.normal.z}")
+        if vecZ.angleTo(face.geometry.normal) == 0:
+            return face
+
 def spawnBodyCopies(args):
 
     showMessage("HIT 1")
@@ -258,6 +284,7 @@ def spawnBodyCopies(args):
     # Points and Bodies are linked 1-1
     directionLineMidpointsCol = adsk.core.ObjectCollection.create()
     copiedBodiesCol = adsk.core.ObjectCollection.create()
+    angleIndexes = []
 
     # For each direction line, spawn a body at it's center & align body to line
     # This has only been tested in the XY plane
@@ -309,6 +336,7 @@ def spawnBodyCopies(args):
             newCopyFeature = spawnBodyComp.features.copyPasteBodies.add(spawnBody)
             baseBodyCopy = spawnBodyComp.bRepBodies.item(index + 1)
             baseBodyCopy.name = f"CopiedBody_{index}"
+            baseBodyCopy.dgbAngle = angle
             if not firstFeature:
                 firstFeature = newCopyFeature
 
@@ -322,8 +350,7 @@ def spawnBodyCopies(args):
 
             directionLineMidpointsCol.add(midpoint_sketchPoint)
             copiedBodiesCol.add(baseBodyCopy)
-
-    showMessage("HIT 2")
+            angleIndexes.append(angle)
 
     # Next, iterate through all Sketch profile in the "Cell Boundaries" Sketch
     allNewBodies = adsk.core.ObjectCollection.create()
@@ -371,12 +398,14 @@ def spawnBodyCopies(args):
 
                 # identify edges of top (+Z facing) face
                 edgeCollection = adsk.core.ObjectCollection.create()
-                vecZ = adsk.core.Vector3D.create(0,0,1)
-                faces = [f for f in extrudedProfileBody.faces if f.geometry.surfaceType == adsk.core.SurfaceTypes.PlaneSurfaceType]
-                for face in faces:
-                    if vecZ.angleTo(face.geometry.normal) == 0:
-                        [edgeCollection.add(edge) for edge in face.edges]
-                        break
+                # vecZ = adsk.core.Vector3D.create(0,0,1)
+                # faces = [f for f in extrudedProfileBody.faces if f.geometry.surfaceType == adsk.core.SurfaceTypes.PlaneSurfaceType]
+                # for face in faces:
+                #     if vecZ.angleTo(face.geometry.normal) == 0:
+                #         [edgeCollection.add(edge) for edge in face.edges]
+                #         break
+                endFace = newExtrude.endFaces.item(0)
+                [edgeCollection.add(edge) for edge in endFace.edges]
 
                 # Create the ChamferInput object.
                 chamferFeatureInput = spawnBodyComp.features.chamferFeatures.createInput2() 
@@ -398,6 +427,7 @@ def spawnBodyCopies(args):
 
                 # add new body to Collection, for use after current loop finishes
                 allNewBodies.add(newCombineFeature.bodies.item(0))
+                showMessage(f"{pointIndex}, {angleIndexes[pointIndex]}, {newCombineFeature.bodies.item(0).name}")
 
             # If not, delete the extruded body (No direction line associated with the Sketch Profile)
             elif extrudedProfileBody: 
@@ -412,8 +442,35 @@ def spawnBodyCopies(args):
         newCompName = f"Copied Bodies {nameIndex}"
     newParentComponent = root.occurrences.addNewComponent(adsk.core.Matrix3D.create()) 
     newParentComponent.component.name = newCompName
-    toNewComponentFeature = newParentComponent.component.features.cutPasteBodies.add(allNewBodies)
+    toNewComponentFeature = newParentComponent.component.features.copyPasteBodies.add(allNewBodies)
     lastFeature = toNewComponentFeature
+
+
+    # Create Component to store realigned & repositioned pieces
+    camReadyBodiesCompNeame = "CAM-Ready Bodies"
+    camReadyBodyComponent: adsk.fusion.Component = None
+    if camReadyBodiesCompNeame not in allCompNames:
+        camReadyBodyComponent = root.occurrences.addNewComponent(adsk.core.Matrix3D.create()) 
+        camReadyBodyComponent.component.name = camReadyBodiesCompNeame
+        toNewComponentFeature = camReadyBodyComponent.component.features.cutPasteBodies.add(allNewBodies)
+        lastFeature = toNewComponentFeature
+    else:
+        camReadyBodyComponent = design.allComponents.itemByName(camReadyBodiesCompNeame)
+    
+    body = camReadyBodyComponent.bRepBodies.item(0)
+    bottomFace = getBodyBottomFace(body)
+    showMessage(f"{bottomFace}, {bottomFace.normal}")
+    geo0 = adsk.fusion.JointGeometry.createByPlanarFace(bottomFace, None, adsk.fusion.JointKeyPointTypes.CenterKeyPoint)
+    geo1 = _spawnBodySelectInput.selection(0).entity
+    joints = rootComp.joints
+    jointInput = joints.createInput(geo0, geo1)
+    jointInput.setAsPlanarJointMotion(adsk.fusion.JointDirections.YAxisJointDirection)
+    joint = joints.add(jointInput)
+
+    # geo0 = adsk.fusion.JointGeometry.createByPlanarFace(endFace, None, adsk.fusion.JointKeyPointTypes.CenterKeyPoint)
+
+
+
 
     # Roll all new features above into a Custom feature
     custFeatInput = newParentComponent.component.features.customFeatures.createInput(_customFeatureDef)
