@@ -346,7 +346,6 @@ def spawnBodyCopies(args):
             newCopyFeature = spawnBodyComp.features.copyPasteBodies.add(spawnBody)
             baseBodyCopy = spawnBodyComp.bRepBodies.item(index + 1)
             baseBodyCopy.name = f"CopiedBody_{index}"
-            baseBodyCopy.dgbAngle = angle
             if not firstFeature:
                 firstFeature = newCopyFeature
 
@@ -439,7 +438,10 @@ def spawnBodyCopies(args):
                 lastFeature = newCombineFeature
 
                 # add new body to Collection, for use after current loop finishes
-                allNewBodies.add(newCombineFeature.bodies.item(0))
+                newBody = newCombineFeature.bodies.item(0)
+                angle = angleIndexes[pointIndex]
+                newBody.attributes.add('AbstractCellGen1', 'BodyAngle', str(angle))
+                allNewBodies.add(newBody)
                 showMessage(f"{pointIndex}, {angleIndexes[pointIndex]}, {newCombineFeature.bodies.item(0).name}")
 
             # If not, delete the extruded body (No direction line associated with the Sketch Profile)
@@ -469,35 +471,54 @@ def spawnBodyCopies(args):
     else:
         camReadyCompOcc = design.allComponents.itemByName(camReadyBodiesCompNeame)
     
+    # Rotate Bodies to align all their "Tracks"
+    for body in camReadyCompOcc.bRepBodies:
+        try:
+            # Get Angle attribute from Body
+            allAttrs = design.findAttributes('AbstractCellGen1', 'BodyAngle')
+            angleStr = [x.value for x in allAttrs if x.parent and x.parent.name == body.name][0]
+            angle = -float(angleStr)
+            matrix: adsk.core.Matrix3D = adsk.core.Matrix3D.create()
+            rotationVector = vector = adsk.core.Vector3D.create(0, 0, 1)
+            
+            # Create Rotation matrix and Feature
+            # Rotation point of matrix is irrelevant, so we can use an out-of-date Point3D
+            # It's Irrelevant because the body will be repositioned when the Joint is created 
+            matrix.setToRotation(math.radians(angle), rotationVector, midpoint_spawnBodyBottom)
+            moveFeatures = camReadyCompOcc.component.features.moveFeatures
+            inputEnts = adsk.core.ObjectCollection.create()
+            inputEnts.add(body)
+            moveInput = moveFeatures.createInput(inputEnts, matrix)
+            moveFeature = moveFeatures.add(moveInput)
+            lastFeature = moveFeature
+        except Exception as e:
+            showMessage(f"{e}")
+
     # Next, convert all bodies in "CAM-Ready Bodies" into SubComponents
     # This is needed to allow them to move individually when Joints are applied
     objCollection = adsk.core.ObjectCollection.create()
-    showMessage(f"{objCollection.count}")
     for body in camReadyCompOcc.bRepBodies:
         newCompBody: adsk.fusion.Component = body.createComponent()
-        showMessage(f"{newCompBody}")
         if objCollection.count == 0:
             objCollection.add(newCompBody)
 
-    # showMessage(f"{objCollection.count}")
-    # # Create Planar Joints for all bodies in "CAM-ready Bodies"
-    # # This allows the user to easily position them
+    # Create Planar Joints for all bodies in "CAM-ready Bodies"
+    # This allows the user to easily position them
     for childOcc in camReadyCompOcc.childOccurrences:
-
         body = childOcc.bRepBodies.item(0)
+        body.isSelectable = False
         bottomFace = getBodyBottomFace(body)
         geo0 = adsk.fusion.JointGeometry.createByPlanarFace(bottomFace, None, adsk.fusion.JointKeyPointTypes.CenterKeyPoint)
         sketchProfile = _destPlaneInput.selection(0).entity
         geo1 = adsk.fusion.JointGeometry.createByProfile(sketchProfile, None, adsk.fusion.JointKeyPointTypes.CenterKeyPoint)
         joints: adsk.fusion.Joints = newParentComponent.component.joints
         jointInput = joints.createInput(geo0, geo1)
-        jointInput.setAsPlanarJointMotion(adsk.fusion.JointDirections.YAxisJointDirection)
+        jointInput.setAsPlanarJointMotion(adsk.fusion.JointDirections.ZAxisJointDirection)
         jointInput.isFlipped = True
         joint = joints.add(jointInput)
 
     # Make 2 MoveFeatures that cancel out
     # This is to allow the Joints created above to be rolled up into the singular CustomFeature 
-    
     objCollection = adsk.core.ObjectCollection.create()
     [objCollection.add(body) for body in spawnBodyComp.bRepBodies]
     transform = adsk.core.Matrix3D.create()   
