@@ -250,11 +250,21 @@ class ComputeCustomFeature(adsk.fusion.CustomFeatureEventHandler):
 
 def getBodyBottomFace(bRepBody):
 
-    vecZ = adsk.core.Vector3D.create(0,0,-1)
+    vecNegZ = adsk.core.Vector3D.create(0,0,-1)
     faces = [f for f in bRepBody.faces if f.geometry.surfaceType == adsk.core.SurfaceTypes.PlaneSurfaceType]
     for face in faces:
-        showMessage(f"{face.geometry.normal.x}, {face.geometry.normal.y}, {face.geometry.normal.z}")
-        if vecZ.angleTo(face.geometry.normal) == 0:
+
+        eva: adsk.core.SurfaceEvaluator = face.evaluator
+
+        normal: adsk.core.Vector3D
+        _, normal = eva.getNormalAtPoint(face.pointOnFace)
+        normal.normalize()
+        
+
+
+        # showMessage(f"{face.geometry.normal.x}, {face.geometry.normal.y}, {face.geometry.normal.z}")
+        if vecNegZ.angleTo(normal) == 0:
+            showMessage(f"{normal.x}, {normal.y}, {normal.z}")
             return face
 
 def spawnBodyCopies(args):
@@ -376,7 +386,7 @@ def spawnBodyCopies(args):
             # Create Extrusion Feature with new Body
             extrudes = spawnBodyComp.features.extrudeFeatures
             distance = adsk.core.ValueInput.createByString(_cellHeightInput.expression)
-            newExtrude = extrudes.addSimple(profile, distance, adsk.fusion.FeatureOperations.NewBodyFeatureOperation)
+            newExtrude: adsk.fusion.ExtrudeFeature = extrudes.addSimple(profile, distance, adsk.fusion.FeatureOperations.NewBodyFeatureOperation)
             extrudedProfileBody: adsk.fusion.BRepBody = newExtrude.bodies.item(0)
             
             # Check if the new body contains/touches any direction line midpoints
@@ -406,6 +416,9 @@ def spawnBodyCopies(args):
                 #         break
                 endFace = newExtrude.endFaces.item(0)
                 [edgeCollection.add(edge) for edge in endFace.edges]
+
+                newExtrude.endFaces.item(0).attributes.add('CellArtGen1', 'extrusionEndFace', "1")
+                newExtrude.startFaces.item(0).attributes.add('CellArtGen1', 'extrusionStartFace', "1")
 
                 # Create the ChamferInput object.
                 chamferFeatureInput = spawnBodyComp.features.chamferFeatures.createInput2() 
@@ -445,37 +458,62 @@ def spawnBodyCopies(args):
     toNewComponentFeature = newParentComponent.component.features.copyPasteBodies.add(allNewBodies)
     lastFeature = toNewComponentFeature
 
-
     # Create Component to store realigned & repositioned pieces
     camReadyBodiesCompNeame = "CAM-Ready Bodies"
-    camReadyBodyComponent: adsk.fusion.Component = None
+    camReadyCompOcc: adsk.fusion.Occurrence = None
     if camReadyBodiesCompNeame not in allCompNames:
-        camReadyBodyComponent = root.occurrences.addNewComponent(adsk.core.Matrix3D.create()) 
-        camReadyBodyComponent.component.name = camReadyBodiesCompNeame
-        toNewComponentFeature = camReadyBodyComponent.component.features.cutPasteBodies.add(allNewBodies)
+        camReadyCompOcc = root.occurrences.addNewComponent(adsk.core.Matrix3D.create()) 
+        camReadyCompOcc.component.name = camReadyBodiesCompNeame
+        toNewComponentFeature = camReadyCompOcc.component.features.cutPasteBodies.add(allNewBodies)
         lastFeature = toNewComponentFeature
     else:
-        camReadyBodyComponent = design.allComponents.itemByName(camReadyBodiesCompNeame)
+        camReadyCompOcc = design.allComponents.itemByName(camReadyBodiesCompNeame)
     
-    body = camReadyBodyComponent.bRepBodies.item(0)
-    bottomFace = getBodyBottomFace(body)
-    showMessage(f"{bottomFace}, {bottomFace.normal}")
-    geo0 = adsk.fusion.JointGeometry.createByPlanarFace(bottomFace, None, adsk.fusion.JointKeyPointTypes.CenterKeyPoint)
-    geo1 = _spawnBodySelectInput.selection(0).entity
-    joints = rootComp.joints
-    jointInput = joints.createInput(geo0, geo1)
-    jointInput.setAsPlanarJointMotion(adsk.fusion.JointDirections.YAxisJointDirection)
-    joint = joints.add(jointInput)
+    # Next, convert all bodies in "CAM-Ready Bodies" into SubComponents
+    # This is needed to allow them to move individually when Joints are applied
+    objCollection = adsk.core.ObjectCollection.create()
+    showMessage(f"{objCollection.count}")
+    for body in camReadyCompOcc.bRepBodies:
+        newCompBody: adsk.fusion.Component = body.createComponent()
+        showMessage(f"{newCompBody}")
+        if objCollection.count == 0:
+            objCollection.add(newCompBody)
 
-    # geo0 = adsk.fusion.JointGeometry.createByPlanarFace(endFace, None, adsk.fusion.JointKeyPointTypes.CenterKeyPoint)
+    # showMessage(f"{objCollection.count}")
+    # # Create Planar Joints for all bodies in "CAM-ready Bodies"
+    # # This allows the user to easily position them
+    for childOcc in camReadyCompOcc.childOccurrences:
 
+        body = childOcc.bRepBodies.item(0)
+        bottomFace = getBodyBottomFace(body)
+        geo0 = adsk.fusion.JointGeometry.createByPlanarFace(bottomFace, None, adsk.fusion.JointKeyPointTypes.CenterKeyPoint)
+        sketchProfile = _destPlaneInput.selection(0).entity
+        geo1 = adsk.fusion.JointGeometry.createByProfile(sketchProfile, None, adsk.fusion.JointKeyPointTypes.CenterKeyPoint)
+        joints: adsk.fusion.Joints = newParentComponent.component.joints
+        jointInput = joints.createInput(geo0, geo1)
+        jointInput.setAsPlanarJointMotion(adsk.fusion.JointDirections.YAxisJointDirection)
+        jointInput.isFlipped = True
+        joint = joints.add(jointInput)
 
-
+    # Make 2 MoveFeatures that cancel out
+    # This is to allow the Joints created above to be rolled up into the singular CustomFeature 
+    
+    objCollection = adsk.core.ObjectCollection.create()
+    [objCollection.add(body) for body in spawnBodyComp.bRepBodies]
+    transform = adsk.core.Matrix3D.create()   
+    moveFeats = spawnBodyComp.features.moveFeatures
+    transform.translation = adsk.core.Vector3D.create(0.0, 0, 1) 
+    moveFeatureInput = moveFeats.createInput(objCollection, transform)
+    moveFeature = moveFeats.add(moveFeatureInput)
+    transform.translation = adsk.core.Vector3D.create(0.0, 0, -1) 
+    moveFeatureInput = moveFeats.createInput(objCollection, transform)
+    moveFeature = moveFeats.add(moveFeatureInput)
+    lastFeature = moveFeature
 
     # Roll all new features above into a Custom feature
-    custFeatInput = newParentComponent.component.features.customFeatures.createInput(_customFeatureDef)
+    custFeatInput = rootComp.features.customFeatures.createInput(_customFeatureDef)
     custFeatInput.setStartAndEndFeatures(firstFeature, lastFeature)
-    spawnBodyComp.features.customFeatures.add(custFeatInput)
+    rootComp.features.customFeatures.add(custFeatInput)
 
     return directionLineMidpointsCol, copiedBodiesCol
 
